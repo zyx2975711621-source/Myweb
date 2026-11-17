@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>后台管理 · 美食记录</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="admin">
+<div id="nav-root"></div>
+<main class="page" id="page">
+  <div class="admin-tabs">
+    <button class="admin-tab active" data-tab="users" type="button">权限名单</button>
+    <button class="admin-tab" data-tab="foods" type="button">美食管理</button>
+    <button class="admin-tab" data-tab="comments" type="button">评论管理</button>
+  </div>
+  <div class="admin-panel" id="panel"></div>
+</main>
+<script src="/app.js"></script>
+<script>
+  var TAB = "users";
+
+  function roleTag(role) {
+    var names = { admin: "管理员", editor: "编辑者", user: "普通用户" };
+    return '<span class="role-tag ' + role + '">' + (names[role] || role) + "</span>";
+  }
+
+  /* ---------- 权限名单 ---------- */
+  function renderUsers(users) {
+    var html = users.map(function (u) {
+      var mid = "";
+      if (u.role !== "admin") {
+        mid = '<select data-uid="' + u.id + '">' +
+          '<option value="user"' + (u.role === "user" ? " selected" : "") + '>普通用户</option>' +
+          '<option value="editor"' + (u.role === "editor" ? " selected" : "") + '>编辑者</option>' +
+          "</select>";
+      }
+      return '<div class="admin-row">' +
+        '<div class="grow"><div class="title">' + escapeHtml(u.username) + " " + roleTag(u.role) + "</div>" +
+        '<div class="sub">注册于 ' + escapeHtml(u.created_at) + " · 记录 " + u.food_count + " · 评论 " + u.comment_count + "</div></div>" +
+        mid + "</div>";
+    }).join("");
+    document.getElementById("panel").innerHTML = html || '<div class="empty-tip">暂无用户</div>';
+    document.querySelectorAll("#panel select[data-uid]").forEach(function (sel) {
+      sel.addEventListener("change", function () {
+        var uid = parseInt(sel.dataset.uid, 10);
+        var role = sel.value;
+        var roleName = role === "editor" ? "编辑者" : "普通用户";
+        if (!confirm("确定将该用户设为「" + roleName + "」吗？")) { load(); return; }
+        api("/api/admin/users/" + uid + "/role", { method: "POST", json: { role: role } })
+          .then(function () { toast("已更新"); load(); })
+          .catch(function (e) { toast(e.message); load(); });
+      });
+    });
+  }
+
+  /* ---------- 美食管理 ---------- */
+  function renderFoods(foods) {
+    var html = foods.map(function (f) {
+      return '<div class="admin-row">' +
+        '<div class="grow"><div class="title">' + escapeHtml(f.title) + " " + renderRatingPill(f.rating) + "</div>" +
+        '<div class="sub">作者 ' + escapeHtml(f.author) + " · 打卡 " + escapeHtml(f.visited_at) +
+        " · ♥ " + f.like_count + " · 💬 " + f.comment_count + "</div></div>" +
+        '<a class="mini-btn" href="/food.html?id=' + f.id + '">查看</a>' +
+        '<a class="mini-btn" href="/upload.html?id=' + f.id + '">编辑</a>' +
+        '<button class="mini-btn danger" data-del="' + f.id + '" data-title="' + escapeHtml(f.title) + '" type="button">删除</button>' +
+        "</div>";
+    }).join("");
+    document.getElementById("panel").innerHTML = html || '<div class="empty-tip">暂无记录</div>';
+    document.querySelectorAll("#panel button[data-del]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        if (!confirm("确定删除「" + btn.dataset.title + "」吗？该操作不可恢复。")) return;
+        api("/api/foods/" + btn.dataset.del, { method: "DELETE" })
+          .then(function () { toast("已删除"); load(); })
+          .catch(function (e) { toast(e.message); });
+      });
+    });
+  }
+
+  /* ---------- 评论管理 ---------- */
+  function renderComments(comments) {
+    var html = comments.map(function (c) {
+      return '<div class="admin-row">' +
+        '<div class="grow"><div class="title">' + escapeHtml(c.content) + "</div>" +
+        '<div class="sub">' + escapeHtml(c.username) + " 评论于美食「" + escapeHtml(c.food_title) +
+        "」 · " + escapeHtml(c.created_at) + "</div></div>" +
+        '<a class="mini-btn" href="/food.html?id=' + c.food_id + '">查看原记录</a>' +
+        '<button class="mini-btn danger" data-del="' + c.id + '" type="button">删除</button>' +
+        "</div>";
+    }).join("");
+    document.getElementById("panel").innerHTML = html || '<div class="empty-tip">暂无评论</div>';
+    document.querySelectorAll("#panel button[data-del]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        if (!confirm("确定删除这条评论吗？")) return;
+        api("/api/comments/" + btn.dataset.del, { method: "DELETE" })
+          .then(function () { toast("已删除"); load(); })
+          .catch(function (e) { toast(e.message); });
+      });
+    });
+  }
+
+  function load() {
+    if (TAB === "users") {
+      api("/api/admin/users").then(function (d) { renderUsers(d.users); })
+        .catch(function (e) { document.getElementById("panel").innerHTML = '<div class="empty-tip">' + escapeHtml(e.message) + "</div>"; });
+    } else if (TAB === "foods") {
+      api("/api/foods?sort=latest").then(function (d) { renderFoods(d.foods); });
+    } else {
+      api("/api/admin/comments").then(function (d) { renderComments(d.comments); });
+    }
+  }
+
+  function pageInit() {
+    if (!ME || ME.role !== "admin") {
+      document.getElementById("page").innerHTML =
+        '<div class="form-card narrow" style="margin-top:20px"><h1>无权限</h1>' +
+        '<p style="text-align:center;color:#64748b;font-size:14px">该页面仅管理员可见。</p>' +
+        '<div class="alt-center"><a href="/">← 返回美食展示</a></div></div>';
+      return;
+    }
+    document.querySelectorAll(".admin-tab").forEach(function (t) {
+      t.addEventListener("click", function () {
+        TAB = t.dataset.tab;
+        document.querySelectorAll(".admin-tab").forEach(function (x) { x.classList.toggle("active", x === t); });
+        load();
+      });
+    });
+    load();
+  }
+
+  initPage();
+</script>
+</body>
+</html>

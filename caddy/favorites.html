@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我的收藏 · 美食记录</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="favorites">
+<div id="nav-root"></div>
+<main class="page">
+  <div class="card-grid" id="grid"></div>
+  <div class="empty-tip" id="empty" style="display:none">还没有收藏任何美食，快去逛逛吧～</div>
+</main>
+<script src="/app.js"></script>
+<script>
+  function load() {
+    api("/api/favorites").then(function (d) {
+      var grid = document.getElementById("grid");
+      grid.innerHTML = d.foods.map(foodCardHtml).join("");
+      document.getElementById("empty").style.display = d.foods.length ? "none" : "block";
+      bindFoodCards(grid, function (id, favorited) {
+        // 在收藏页取消收藏后，把该卡片移出列表
+        if (!favorited) {
+          var el = grid.querySelector('.food-card[data-id="' + id + '"]');
+          if (el) el.remove();
+          if (!grid.children.length) {
+            document.getElementById("empty").style.display = "block";
+          }
+        }
+      });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function pageInit() {
+    if (!ME) { location.href = "/login.html"; return; }
+    load();
+  }
+
+  initPage();
+</script>
+</body>
+</html>

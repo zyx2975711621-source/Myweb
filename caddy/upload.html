@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>上传美食记录 · 美食记录</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  .two-col { display: flex; gap: 20px; flex-wrap: wrap; }
+  .two-col > div { flex: 1; min-width: 260px; }
+  #new-imgs .img-pick-item { width: 74px; height: 74px; }
+  #new-imgs .img-add { width: 74px; height: 74px; }
+  .rate-opts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .rate-opt {
+    padding: 7px 16px; border-radius: 999px; border: 1px solid #cbd5e1;
+    background: #fff; cursor: pointer; font-size: 14px; color: #475569; transition: all .12s;
+  }
+  .rate-opt.sel { font-weight: 700; border-color: currentColor; box-shadow: 0 0 0 2.5px rgba(13, 148, 136, .3); transform: scale(1.05); }
+</style>
+</head>
+<body data-page="upload">
+<div id="nav-root"></div>
+<main class="page">
+  <div class="form-card" style="max-width:820px">
+    <h1 id="form-title">上传美食记录</h1>
+    <label>店名 *</label>
+    <input type="text" id="f-title" maxlength="50" placeholder="美食店的名字">
+    <label>等级评价 *</label>
+    <div class="rate-opts" id="rate-opts"></div>
+    <div class="hint" id="rate-hint">点击选择一个等级</div>
+    <label>评价文字 *</label>
+    <textarea id="f-content" maxlength="2000" placeholder="味道、环境、服务怎么样？"></textarea>
+    <div class="hint">最多 2000 字</div>
+    <div class="two-col">
+      <div>
+        <label>打卡时间 *</label>
+        <input type="datetime-local" id="f-visited">
+        <div class="hint">默认为当前时间，可手动修改</div>
+      </div>
+      <div>
+        <label>地址（高德地图定位地址）</label>
+        <input type="text" id="f-address" maxlength="100" placeholder="粘贴高德地图分享的详细地址">
+        <div class="hint">详情页会自动生成“在高德地图中查看”链接</div>
+      </div>
+    </div>
+    <label>图片（最多 5 张，自动压缩）</label>
+    <div class="img-pick-row" id="img-row"></div>
+    <input type="file" id="f-files" accept="image/*" multiple style="display:none">
+    <div class="msg" id="msg"></div>
+    <button class="submit-btn" id="submit-btn" type="button">保存记录</button>
+    <div class="alt-center"><a href="/">← 返回美食展示</a></div>
+  </div>
+</main>
+<script src="/app.js"></script>
+<script>
+  var RATING = 0;
+  var editId = parseInt(new URLSearchParams(location.search).get("id"), 10);
+  if (isNaN(editId)) editId = null;
+  var keepImages = [];
+  var newFiles = [];
+  var busy = false;
+
+  /* ---------- rating pills ---------- */
+  function buildRating() {
+    var wrap = document.getElementById("rate-opts");
+    wrap.innerHTML = "";
+    for (var i = 5; i >= 1; i--) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "rate-opt " + RATING_CLASS[i];
+      b.textContent = ratingLabel(i);
+      b.dataset.v = i;
+      b.addEventListener("click", function () { RATING = parseInt(this.dataset.v, 10); paintRating(); });
+      wrap.appendChild(b);
+    }
+  }
+  function paintRating() {
+    document.querySelectorAll("#rate-opts .rate-opt").forEach(function (b) {
+      b.classList.toggle("sel", parseInt(b.dataset.v, 10) === RATING);
+    });
+    document.getElementById("rate-hint").textContent = RATING ? "当前等级：" + ratingLabel(RATING) : "点击选择一个等级";
+  }
+
+  /* ---------- image picker ---------- */
+  async function compressImage(file) {
+    try {
+      if (!file.type || !file.type.startsWith("image/")) throw new Error("not image");
+      var img = await createImageBitmap(file);
+      var max = 1600;
+      var scale = Math.min(1, max / Math.max(img.width, img.height));
+      var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      var canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      var blob = await new Promise(function (res) { canvas.toBlob(res, "image/jpeg", 0.85); });
+      if (!blob) throw new Error("no blob");
+      if (blob.size >= file.size) return file;
+      return new File([blob], "c_" + Date.now() + "_" + Math.floor(Math.random() * 1e6) + ".jpg", { type: "image/jpeg" });
+    } catch (e) {
+      return file;
+    }
+  }
+
+  function renderImgRow() {
+    var row = document.getElementById("img-row");
+    row.innerHTML = "";
+    keepImages.forEach(function (im, i) {
+      var d = document.createElement("div");
+      d.className = "img-pick-item";
+      d.innerHTML = '<img src="/uploads/' + escapeHtml(im.filename) + '" alt="">' +
+        '<button class="rm" type="button" title="移除">✕</button>';
+      d.querySelector(".rm").addEventListener("click", function () {
+        keepImages.splice(i, 1); renderImgRow();
+      });
+      row.appendChild(d);
+    });
+    newFiles.forEach(function (f, i) {
+      var d = document.createElement("div");
+      d.className = "img-pick-item";
+      d.innerHTML = '<img src="' + URL.createObjectURL(f) + '" alt="">' +
+        '<button class="rm" type="button" title="移除">✕</button>';
+      d.querySelector(".rm").addEventListener("click", function () {
+        newFiles.splice(i, 1); renderImgRow();
+      });
+      row.appendChild(d);
+    });
+    var total = keepImages.length + newFiles.length;
+    if (total < 5) {
+      var add = document.createElement("div");
+      add.className = "img-add";
+      add.innerHTML = '<span class="big">＋</span><span>添加图片</span>';
+      add.addEventListener("click", function () { document.getElementById("f-files").click(); });
+      row.appendChild(add);
+    }
+  }
+
+  document.getElementById("f-files").addEventListener("change", async function (e) {
+    var room = 5 - keepImages.length - newFiles.length;
+    var files = Array.from(e.target.files || []);
+    this.value = "";
+    if (room <= 0) { toast("最多 5 张图片"); return; }
+    files = files.slice(0, room);
+    toast("处理图片中…");
+    for (var i = 0; i < files.length; i++) {
+      newFiles.push(await compressImage(files[i]));
+    }
+    renderImgRow();
+  });
+
+  /* ---------- edit mode ---------- */
+  function fillForm(f) {
+    document.getElementById("f-title").value = f.title;
+    RATING = f.rating; paintRating();
+    document.getElementById("f-content").value = f.content;
+    document.getElementById("f-address").value = f.address_text || "";
+    document.getElementById("f-visited").value = (f.visited_at || "").replace(" ", "T");
+    keepImages = f.images.map(function (im) { return { id: im.id, filename: im.filename }; });
+    renderImgRow();
+  }
+
+  function localNowStr() {
+    var d = new Date(Date.now() + 8 * 3600 * 1000);
+    return d.toISOString().slice(0, 16);
+  }
+
+  function pageInit() {
+    var role = ME ? ME.role : "guest";
+    if (!(role === "editor" || role === "admin")) {
+      document.querySelector(".page").innerHTML =
+        '<div class="form-card narrow"><h1>无权限</h1>' +
+        '<p style="text-align:center;color:#64748b;font-size:14px">只有授权编辑者可以上传美食记录。</p>' +
+        '<div class="alt-center"><a href="/">← 返回美食展示</a></div></div>';
+      return;
+    }
+    buildRating();
+    document.getElementById("f-visited").value = localNowStr();
+    renderImgRow();
+    if (editId) {
+      document.getElementById("form-title").textContent = "编辑美食记录";
+      api("/api/foods/" + editId).then(function (d) { fillForm(d.food); })
+        .catch(function (e) { toast(e.message); });
+    }
+    document.getElementById("submit-btn").addEventListener("click", function () {
+      if (busy) return;
+      var title = document.getElementById("f-title").value.trim();
+      var content = document.getElementById("f-content").value.trim();
+      var address = document.getElementById("f-address").value.trim();
+      var visited = document.getElementById("f-visited").value;
+      var msg = document.getElementById("msg");
+      msg.textContent = "";
+      if (!title) { msg.textContent = "请填写店名"; return; }
+      if (!RATING) { msg.textContent = "请选择等级评价"; return; }
+      if (!content) { msg.textContent = "请填写评价文字"; return; }
+      if (!visited) { msg.textContent = "请选择打卡时间"; return; }
+      var fd = new FormData();
+      fd.append("title", title);
+      fd.append("rating", RATING);
+      fd.append("content", content);
+      fd.append("address_text", address);
+      fd.append("visited_at", visited);
+      var btn = this;
+      busy = true; btn.disabled = true; btn.textContent = "保存中…";
+      var req;
+      if (editId) {
+        fd.append("keep_images", JSON.stringify(keepImages.map(function (im) { return im.id; })));
+        newFiles.forEach(function (f) { fd.append("files", f); });
+        req = api("/api/foods/" + editId, { method: "PUT", form: fd });
+      } else {
+        newFiles.forEach(function (f) { fd.append("files", f); });
+        req = api("/api/foods", { method: "POST", form: fd });
+      }
+      req.then(function (d) {
+        location.href = "/food.html?id=" + d.id;
+      }).catch(function (e) {
+        msg.textContent = e.message;
+        busy = false; btn.disabled = false; btn.textContent = "保存记录";
+      });
+    });
+  }
+
+  initPage();
+</script>
+</body>
+</html>

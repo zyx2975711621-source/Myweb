@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>个人主页 · 美食记录</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="profile">
+<div id="nav-root"></div>
+<main class="page" id="page" style="display:none">
+  <div class="profile-head">
+    <div class="profile-avatar" id="p-avatar"></div>
+    <div>
+      <div class="profile-name"><span id="p-name"></span><span id="p-role"></span></div>
+      <div class="profile-stats" id="p-stats"></div>
+    </div>
+  </div>
+
+  <h2 class="sec-title">⚙️ 账号设置</h2>
+  <div class="form-card" style="max-width:480px;margin:0">
+    <label>用户名</label>
+    <input type="text" id="s-username" maxlength="20">
+    <p class="hint">2-20 位字母、数字、下划线、点或短横线</p>
+    <label>旧密码 *</label>
+    <input type="password" id="s-old" autocomplete="current-password">
+    <p class="hint">修改用户名或密码都需要先验证旧密码</p>
+    <label>新密码</label>
+    <input type="password" id="s-new" autocomplete="new-password">
+    <p class="hint">留空表示不修改密码；修改需 6-64 位</p>
+    <label>确认新密码</label>
+    <input type="password" id="s-confirm" autocomplete="new-password">
+    <div class="msg" id="s-msg"></div>
+    <button class="submit-btn" id="s-save" type="button">保存设置</button>
+  </div>
+
+  <div id="foods-section" style="display:none">
+    <h2 class="sec-title">🍜 我的探店</h2>
+    <div class="card-grid" id="foods-grid"></div>
+    <div class="empty-tip" id="foods-empty" style="display:none">还没有发布过探店记录，点导航栏的「＋」去打卡吧～</div>
+  </div>
+
+  <h2 class="sec-title">💬 我的评论</h2>
+  <div class="admin-panel" id="comments-list"></div>
+</main>
+<script src="/app.js"></script>
+<script>
+  function pageInit() {
+    if (!ME) { location.href = "/login.html"; return; }
+    document.getElementById("page").style.display = "";
+    api("/api/profile").then(function (d) {
+      var u = d.user;
+      var roleNames = { admin: "管理员", editor: "编辑者", user: "普通用户" };
+      document.getElementById("p-avatar").textContent = u.username.charAt(0).toUpperCase();
+      document.getElementById("p-name").textContent = u.username;
+      document.getElementById("p-role").innerHTML = '<span class="role-tag ' + u.role + '">' + (roleNames[u.role] || u.role) + "</span>";
+      var stats = [];
+      if (u.role === "editor" || u.role === "admin") stats.push("探店 " + d.foods.length);
+      stats.push("评论 " + d.comments.length);
+      document.getElementById("p-stats").textContent = stats.join(" · ");
+
+      // 我的探店（编辑者/管理员）
+      if (u.role === "editor" || u.role === "admin") {
+        document.getElementById("foods-section").style.display = "";
+        var fg = document.getElementById("foods-grid");
+        fg.innerHTML = d.foods.map(foodCardHtml).join("");
+        document.getElementById("foods-empty").style.display = d.foods.length ? "none" : "block";
+        bindFoodCards(fg);
+      }
+
+      // 我的评论
+      var cl = document.getElementById("comments-list");
+      if (!d.comments.length) {
+        cl.innerHTML = '<div class="empty-tip" style="padding:24px 0">还没有发表过评论～</div>';
+      } else {
+        cl.innerHTML = d.comments.map(function (c) {
+          return '<div class="profile-comment">' +
+            '<div class="pc-food">关于「<a href="/food.html?id=' + c.food_id + '">' + escapeHtml(c.food_title) + '</a>」</div>' +
+            '<div class="pc-body">' + escapeHtml(c.content) + "</div>" +
+            '<div class="pc-time">' + escapeHtml(c.created_at) + "</div></div>";
+        }).join("");
+      }
+
+      // 账号设置
+      document.getElementById("s-username").value = u.username;
+      document.getElementById("s-save").addEventListener("click", function () {
+        var msg = document.getElementById("s-msg");
+        msg.textContent = "";
+        var username = document.getElementById("s-username").value.trim();
+        var oldPw = document.getElementById("s-old").value;
+        var newPw = document.getElementById("s-new").value;
+        var confirmPw = document.getElementById("s-confirm").value;
+        if (username === u.username && !newPw) { msg.textContent = "没有需要保存的修改"; return; }
+        if (newPw && newPw !== confirmPw) { msg.textContent = "两次输入的新密码不一致"; return; }
+        if (newPw && newPw.length < 6) { msg.textContent = "新密码至少 6 位"; return; }
+        if (!oldPw) { msg.textContent = "请输入旧密码以确认身份"; return; }
+        api("/api/profile/update", {
+          method: "POST", silent401: true,
+          json: { username: username, old_password: oldPw, new_password: newPw || "" }
+        }).then(function () {
+          toast("设置已保存，即将刷新页面");
+          setTimeout(function () { location.reload(); }, 900);
+        }).catch(function (e) { msg.textContent = e.message; });
+      });
+    }).catch(function (e) {
+      document.getElementById("page").innerHTML =
+        '<div class="empty-tip">' + escapeHtml(e.message) + '</div>';
+    });
+  }
+
+  initPage();
+</script>
+</body>
+</html>

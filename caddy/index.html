@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>美食展示 · 美食记录</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="foods">
+<div id="nav-root"></div>
+<main class="page">
+  <div class="filter-bar">
+    <input type="text" id="q" placeholder="搜索店名…">
+    <select id="stars">
+      <option value="">全部等级</option>
+      <option value="5">夯</option>
+      <option value="4">顶级</option>
+      <option value="3">人上人</option>
+      <option value="2">NPC</option>
+      <option value="1">拉完了</option>
+    </select>
+    <select id="sort">
+      <option value="latest">最新打卡</option>
+      <option value="rating">高分优先</option>
+    </select>
+  </div>
+  <div class="card-grid" id="grid"></div>
+  <div class="empty-tip" id="empty" style="display:none">还没有美食记录，快去打卡吧～</div>
+</main>
+<script src="/app.js"></script>
+<script>
+  var debounceTimer = null;
+
+  function render(foods) {
+    var grid = document.getElementById("grid");
+    grid.innerHTML = foods.map(foodCardHtml).join("");
+    document.getElementById("empty").style.display = foods.length ? "none" : "block";
+    bindFoodCards(grid);
+  }
+
+  function load() {
+    var params = new URLSearchParams();
+    var q = document.getElementById("q").value.trim();
+    var stars = document.getElementById("stars").value;
+    var sort = document.getElementById("sort").value;
+    if (q) params.set("q", q);
+    if (stars) params.set("stars", stars);
+    params.set("sort", sort);
+    api("/api/foods?" + params.toString(), { silent401: true })
+      .then(function (d) { render(d.foods); })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  function pageInit() {
+    document.getElementById("q").addEventListener("input", function () {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(load, 300);
+    });
+    document.getElementById("stars").addEventListener("change", load);
+    document.getElementById("sort").addEventListener("change", load);
+    load();
+  }
+
+  initPage();
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我的待吃 · 美食记录</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="todo">
+<div id="nav-root"></div>
+<main class="page">
+  <div class="card-grid" id="grid"></div>
+  <div class="empty-tip" id="empty" style="display:none">待吃清单还空着，看到想吃的就点「＋ 待吃」加进来吧～</div>
+</main>
+<script src="/app.js"></script>
+<script>
+  function load() {
+    api("/api/wanttoeat").then(function (d) {
+      var grid = document.getElementById("grid");
+      grid.innerHTML = d.foods.map(foodCardHtml).join("");
+      document.getElementById("empty").style.display = d.foods.length ? "none" : "block";
+      bindFoodCards(grid, null, function (id, wanted) {
+        // 在待吃页取消后，把该卡片移出列表
+        if (!wanted) {
+          var el = grid.querySelector('.food-card[data-id="' + id + '"]');
+          if (el) el.remove();
+          if (!grid.children.length) {
+            document.getElementById("empty").style.display = "block";
+          }
+        }
+      });
+    }).catch(function (e) { toast(e.message); });
+  }
+
+  function pageInit() {
+    if (!ME) { location.href = "/login.html"; return; }
+    load();
+  }
+
+  initPage();
+</script>
+</body>
+</html>

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>美食详情 · 美食记录</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body data-page="foods">
+<div id="nav-root"></div>
+<main class="page detail-wrap" id="wrap" style="display:none">
+  <div class="detail-card">
+    <div class="detail-head">
+      <h1 id="d-title"></h1>
+      <div class="detail-sub" id="d-sub"></div>
+    </div>
+    <div class="detail-gallery" id="d-gallery"></div>
+    <div class="detail-content" id="d-content"></div>
+    <div class="detail-address" id="d-address" style="display:none"></div>
+    <div class="detail-actions" id="d-actions"></div>
+  </div>
+  <div class="comment-section">
+    <h2 id="c-title">评论</h2>
+    <div id="c-list"></div>
+    <div id="c-form-wrap"></div>
+  </div>
+</main>
+<script src="/app.js"></script>
+<script>
+  var FOOD = null;
+
+  function foodId() { return parseInt(new URLSearchParams(location.search).get("id"), 10); }
+
+  function renderDetail() {
+    var f = FOOD;
+    document.title = f.title + " · 美食记录";
+    document.getElementById("d-title").textContent = f.title;
+    document.getElementById("d-sub").innerHTML =
+      renderRatingPill(f.rating) + "<span>打卡时间：" + escapeHtml(f.visited_at) + "</span>" +
+      "<span>记录者：" + escapeHtml(f.author) + "</span>";
+    var g = document.getElementById("d-gallery");
+    g.innerHTML = f.images.map(function (im, i) {
+      return '<img loading="lazy" src="/uploads/' + escapeHtml(im.filename) + '" data-i="' + i + '" alt="美食图片">';
+    }).join("");
+    g.style.display = f.images.length ? "" : "none";
+    g.querySelectorAll("img").forEach(function (img) {
+      img.addEventListener("click", function () {
+        openLightbox(f.images.map(function (im) { return "/uploads/" + im.filename; }), parseInt(img.dataset.i, 10));
+      });
+    });
+    document.getElementById("d-content").textContent = f.content || "";
+    document.getElementById("d-content").style.display = f.content ? "" : "none";
+    var addr = document.getElementById("d-address");
+    if (f.address_text) {
+      addr.innerHTML = '<span>📍 ' + escapeHtml(f.address_text) + "</span>" +
+        '<a href="' + amapSearchLink(f.address_text) + '" target="_blank" rel="noopener">在高德地图中查看 ↗</a>';
+      addr.style.display = "";
+    } else {
+      addr.style.display = "none";
+    }
+    var act = document.getElementById("d-actions");
+    act.innerHTML = "";
+    var likeBtn = document.createElement("button");
+    likeBtn.className = "action-btn" + (f.liked ? " liked" : "");
+    likeBtn.innerHTML = (f.liked ? "♥" : "♡") + " 点赞 " + f.like_count;
+    likeBtn.addEventListener("click", function () { toggleLike(); });
+    var favBtn = document.createElement("button");
+    favBtn.className = "action-btn" + (f.favorited ? " faved" : "");
+    favBtn.innerHTML = (f.favorited ? "⭐ 已收藏" : "☆ 收藏");
+    favBtn.addEventListener("click", function () { toggleFav(); });
+    var wantBtn = document.createElement("button");
+    wantBtn.className = "action-btn want" + (f.wanted ? " wanted" : "");
+    wantBtn.innerHTML = f.wanted ? "✓ 已在待吃" : "＋ 待吃";
+    wantBtn.addEventListener("click", function () { toggleWant(); });
+    if (ME) { act.appendChild(wantBtn); act.appendChild(likeBtn); act.appendChild(favBtn); }
+    else {
+      var tip = document.createElement("span");
+      tip.style.cssText = "font-size:14px;color:#94a3b8;align-self:center";
+      tip.textContent = "登录后可点赞、收藏、评论";
+      act.appendChild(tip);
+      var goLogin = document.createElement("a");
+      goLogin.className = "action-btn teal";
+      goLogin.href = "/login.html";
+      goLogin.textContent = "去登录";
+      act.appendChild(goLogin);
+    }
+    if (f.can_edit) {
+      var editBtn = document.createElement("a");
+      editBtn.className = "action-btn";
+      editBtn.href = "/upload.html?id=" + f.id;
+      editBtn.textContent = "✎ 编辑";
+      act.appendChild(editBtn);
+    }
+    if (f.is_admin) {
+      var delBtn = document.createElement("button");
+      delBtn.className = "action-btn danger";
+      delBtn.textContent = "🗑 删除";
+      delBtn.addEventListener("click", function () {
+        if (!confirm("确定删除「" + f.title + "」吗？该操作不可恢复。")) return;
+        api("/api/foods/" + f.id, { method: "DELETE" }).then(function () {
+          toast("已删除");
+          setTimeout(function () { location.href = "/"; }, 700);
+        }).catch(function (e) { toast(e.message); });
+      });
+      act.appendChild(delBtn);
+    }
+  }
+
+  function renderComments() {
+    var f = FOOD;
+    document.getElementById("c-title").textContent = "评论 (" + f.comments.length + ")";
+    var list = document.getElementById("c-list");
+    if (!f.comments.length) {
+      list.innerHTML = '<div style="color:#94a3b8;font-size:14px;padding:10px 0">还没有评论，来说两句吧～</div>';
+    } else {
+      list.innerHTML = f.comments.map(function (c) {
+        var ops = "";
+        if (ME && (ME.role === "admin" || c.user_id === ME.id)) {
+          ops = '<button type="button" data-act="edit">编辑</button>' +
+                '<button type="button" data-act="del">删除</button>';
+        }
+        return '<div class="comment-item" data-cid="' + c.id + '" data-uid="' + c.user_id + '">' +
+          '<div class="comment-head"><b>' + escapeHtml(c.username) + "</b><span>" + escapeHtml(c.created_at) + "</span>" +
+          '<span class="spacer"></span>' + ops + "</div>" +
+          '<div class="comment-body">' + escapeHtml(c.content) + "</div></div>";
+      }).join("");
+      list.querySelectorAll("button[data-act]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var item = btn.closest(".comment-item");
+          var cid = parseInt(item.dataset.cid, 10);
+          if (btn.dataset.act === "del") {
+            if (!confirm("确定删除这条评论吗？")) return;
+            api("/api/comments/" + cid, { method: "DELETE" }).then(loadFood).catch(function (e) { toast(e.message); });
+          } else {
+            var body = item.querySelector(".comment-body");
+            var cur = body.textContent;
+            var next = prompt("修改评论：", cur);
+            if (next === null) return;
+            next = next.trim();
+            if (!next) { toast("评论内容不能为空"); return; }
+            api("/api/comments/" + cid, { method: "PUT", json: { content: next } }).then(loadFood).catch(function (e) { toast(e.message); });
+          }
+        });
+      });
+    }
+    var fw = document.getElementById("c-form-wrap");
+    if (ME) {
+      fw.innerHTML =
+        '<div class="comment-form"><textarea id="c-input" maxlength="500" placeholder="写下你的评论…（直接发布，无需审核）"></textarea>' +
+        '<div class="row"><button type="button" id="c-submit">发表评论</button></div></div>';
+      document.getElementById("c-submit").addEventListener("click", function () {
+        var v = document.getElementById("c-input").value.trim();
+        if (!v) { toast("评论内容不能为空"); return; }
+        api("/api/foods/" + foodId() + "/comments", { method: "POST", json: { content: v } })
+          .then(function () { toast("评论已发布"); loadFood(); })
+          .catch(function (e) { toast(e.message); });
+      });
+    } else {
+      fw.innerHTML = '<div style="color:#94a3b8;font-size:14px">登录后即可发表评论，<a href="/login.html">去登录</a></div>';
+    }
+  }
+
+  function loadFood() {
+    api("/api/foods/" + foodId(), { silent401: true })
+      .then(function (d) { FOOD = d.food; renderDetail(); renderComments(); })
+      .catch(function (e) {
+        document.getElementById("wrap").innerHTML =
+          '<div class="empty-tip">' + escapeHtml(e.message) + '，<a href="/">返回美食展示</a></div>';
+      });
+  }
+
+  function toggleLike() {
+    api("/api/foods/" + foodId() + "/like", { method: "POST" })
+      .then(function (d) {
+        FOOD.liked = d.liked; FOOD.like_count = d.like_count; renderDetail();
+      })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  function toggleFav() {
+    api("/api/foods/" + foodId() + "/favorite", { method: "POST" })
+      .then(function (d) {
+        FOOD.favorited = d.favorited; renderDetail();
+        toast(d.favorited ? "已加入收藏" : "已取消收藏");
+      })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  function toggleWant() {
+    api("/api/foods/" + foodId() + "/want", { method: "POST" })
+      .then(function (d) {
+        FOOD.wanted = d.wanted; FOOD.want_count = d.want_count; renderDetail();
+        toast(d.wanted ? "已加入我的待吃" : "已从待吃移除");
+      })
+      .catch(function (e) { toast(e.message); });
+  }
+
+  function pageInit() {
+    document.getElementById("wrap").style.display = "";
+    loadFood();
+  }
+
+  initPage();
+</script>
+</body>
+</html>
